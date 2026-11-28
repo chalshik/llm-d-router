@@ -27,11 +27,13 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive
 	. "github.com/onsi/gomega"    //nolint:revive
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -507,4 +509,20 @@ func (m *mockSGLangGRPCServer) Generate(req *sglangapiv1.GenerateRequest, stream
 		}
 	}
 	return nil
+}
+
+// Every decode sidecar sends rooms to the same prefill pods, so rooms must not
+// repeat across concurrent requests, and they must stay exact in JSON decoders
+// that read numbers as float64.
+func TestGenerateSGLangRoomIDIsUniqueAndFloat64Exact(t *testing.T) {
+	s := &Server{}
+	seen := make(map[int64]struct{}, 10000)
+	for range 10000 {
+		room := s.generateSGLangRoomID()
+		require.GreaterOrEqual(t, room, int64(0))
+		require.Less(t, room, int64(1<<53))
+		_, dup := seen[room]
+		require.False(t, dup, "room %d repeated", room)
+		seen[room] = struct{}{}
+	}
 }

@@ -24,7 +24,6 @@ import (
 	"os"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/trace"
@@ -151,6 +150,9 @@ func (s *Server) addSGLangBootstrapInfo(logger logr.Logger, requestData map[stri
 	return modifiedRequest
 }
 
+// generateSGLangRoomID draws the room uniformly below 2^53: prefill pods key
+// transfers by room across every decode sidecar, and the room must stay exact
+// through gateways that decode JSON numbers as float64.
 func (s *Server) generateSGLangRoomID() int64 {
-	return time.Now().UnixNano() + int64(rand.IntN(1000)) //#nosec G404 -- non-crypto use, a room ID disambiguator
+	return rand.Int64N(1 << 53) //#nosec G404 -- non-crypto use, a room ID disambiguator
 }
