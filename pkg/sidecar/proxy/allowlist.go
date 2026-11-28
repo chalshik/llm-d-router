@@ -443,6 +443,15 @@ func (av *AllowlistValidator) createPodInformer(poolName string, selector labels
 
 	// Start the informer with its own stop channel
 	go podInformer.Run(podStopCh)
+
+	// The pods of a replaced informer stay allowed until a rebuild, and a
+	// selector that matches no pods delivers no events, so rebuild once the
+	// new informer has listed its pods.
+	go func() {
+		if cache.WaitForCacheSync(podStopCh, podInformer.HasSynced) {
+			av.rebuildAllowlist()
+		}
+	}()
 }
 
 // onPodAdd handles new pods matching our selectors

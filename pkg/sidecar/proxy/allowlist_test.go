@@ -271,6 +271,17 @@ var _ = Describe("AllowlistValidator", func() {
 				3*time.Second, 10*time.Millisecond).Should(BeTrue())
 			Expect(validator.IsAllowed("10.244.1.2:8000")).To(BeFalse())
 		})
+
+		It("should drop the old pods when the new pool selector matches no pods", func() {
+			updated := pool.DeepCopy()
+			Expect(unstructured.SetNestedStringMap(updated.Object,
+				map[string]string{"app": "other"}, "spec", "selector", "matchLabels")).To(Succeed())
+			validator.onInferencePoolUpdate(pool, updated)
+
+			Eventually(func() bool {
+				return validator.IsAllowed("10.244.1.2:8000") || validator.IsAllowedHost("10.244.1.2")
+			}, 3*time.Second, 10*time.Millisecond).Should(BeFalse())
+		})
 	})
 
 	Context("when SSRF protection is disabled", func() {
