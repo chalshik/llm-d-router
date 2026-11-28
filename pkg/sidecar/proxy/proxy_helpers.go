@@ -486,6 +486,8 @@ func readBody(r *http.Request) ([]byte, error) {
 func cloneRequestWithBody(ctx context.Context, r *http.Request, body []byte) *http.Request {
 	cloned := r.Clone(ctx)
 	cloned.Body = io.NopCloser(bytes.NewReader(body))
+	// Lets the HTTP/2 transport replay the body after a GOAWAY or REFUSED_STREAM.
+	cloned.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 	cloned.ContentLength = int64(len(body))
 	return cloned
 }

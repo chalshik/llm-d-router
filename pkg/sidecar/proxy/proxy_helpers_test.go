@@ -648,3 +648,29 @@ func TestReadBodyIgnoresOversizedContentLength(t *testing.T) {
 		t.Errorf("readBody = %q", raw)
 	}
 }
+
+// GetBody lets the HTTP/2 transport replay the body after a GOAWAY or a
+// REFUSED_STREAM.
+func TestCloneRequestWithBodyReplaysBody(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("inbound"))
+	body := []byte(`{"model":"m"}`)
+
+	cloned := cloneRequestWithBody(t.Context(), r, body)
+
+	if cloned.GetBody == nil {
+		t.Fatal("GetBody is nil")
+	}
+	for i := range 2 {
+		rc, err := cloned.GetBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		replay, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(replay, body) {
+			t.Errorf("replay %d = %q, want %q", i, replay, body)
+		}
+	}
+}
