@@ -36,12 +36,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive
 	. "github.com/onsi/gomega"    //nolint:revive
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -270,6 +274,43 @@ var _ = Describe("AllowlistValidator", func() {
 			Eventually(func() bool { return validator.IsAllowed("10.244.1.2:9000") },
 				3*time.Second, 10*time.Millisecond).Should(BeTrue())
 			Expect(validator.IsAllowed("10.244.1.2:8000")).To(BeFalse())
+		})
+
+		It("should follow a pod IP change", func() {
+			pod, err := client.Resource(podGVR).Namespace("test").Get(context.Background(), "pod-1", metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(unstructured.SetNestedField(pod.Object, "10.244.1.9", "status", "podIP")).To(Succeed())
+			_, err = client.Resource(podGVR).Namespace("test").Update(context.Background(), pod, metav1.UpdateOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			Eventually(func() bool { return validator.IsAllowed("10.244.1.9:8000") },
+				3*time.Second, 10*time.Millisecond).Should(BeTrue())
+			Expect(validator.IsAllowed("10.244.1.2:8000")).To(BeFalse())
+		})
+	})
+
+	Context("onPodUpdate", func() {
+		It("should rebuild the allowlist only when the pod IP changes", func() {
+			validator := newTestAllowlistValidator()
+			var rebuilds atomic.Int32
+			validator.logger = funcr.New(func(_, args string) {
+				if strings.Contains(args, `"rebuilt allowlist"`) {
+					rebuilds.Add(1)
+				}
+			}, funcr.Options{Verbosity: logging.TRACE})
+			pod := &unstructured.Unstructured{Object: map[string]interface{}{
+				"metadata": map[string]interface{}{"name": "pod-0", "namespace": "test"},
+				"status":   map[string]interface{}{"podIP": "10.244.1.1"},
+			}}
+
+			// A resync redelivers the cached pod as both old and new.
+			validator.onPodUpdate(pod, pod)
+			Expect(rebuilds.Load()).To(BeZero())
+
+			moved := pod.DeepCopy()
+			Expect(unstructured.SetNestedField(moved.Object, "10.244.1.9", "status", "podIP")).To(Succeed())
+			validator.onPodUpdate(pod, moved)
+			Expect(rebuilds.Load()).To(Equal(int32(1)))
 		})
 	})
 

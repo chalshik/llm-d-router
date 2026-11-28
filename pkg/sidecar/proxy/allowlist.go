@@ -453,10 +453,17 @@ func (av *AllowlistValidator) onPodAdd(obj interface{}) {
 	av.rebuildAllowlist()
 }
 
-// onPodUpdate handles updated pods
-func (av *AllowlistValidator) onPodUpdate(_, newObj interface{}) {
+// onPodUpdate handles updated pods. The informer also calls it for every pod
+// on each resync. The allowlist reads only the pod's name, which an update
+// cannot change, and its IP, so an update that keeps the IP is skipped.
+func (av *AllowlistValidator) onPodUpdate(oldObj, newObj interface{}) {
 	pod := newObj.(*unstructured.Unstructured)
 	podIP, _, _ := unstructured.NestedString(pod.Object, "status", "podIP")
+	if oldPod, ok := oldObj.(*unstructured.Unstructured); ok {
+		if oldIP, _, _ := unstructured.NestedString(oldPod.Object, "status", "podIP"); oldIP == podIP {
+			return
+		}
+	}
 	av.logger.V(logging.DEBUG).Info("Pod updated", "name", pod.GetName(), "ip", podIP)
 	av.rebuildAllowlist()
 }
@@ -500,7 +507,7 @@ func (av *AllowlistValidator) rebuildAllowlist() {
 		}
 	}
 
-	av.logger.Info("rebuilt allowlist", "targetCount", len(av.allowedTargets), "targets", av.allowedTargets)
+	av.logger.V(logging.TRACE).Info("rebuilt allowlist", "targetCount", len(av.allowedTargets), "targets", av.allowedTargets)
 }
 
 // addPodToAllowlist adds a host:port entry for each of the pod's addresses on each pool target port
